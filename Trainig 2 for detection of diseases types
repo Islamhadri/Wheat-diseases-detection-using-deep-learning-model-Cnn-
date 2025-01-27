@@ -1,0 +1,123 @@
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+import matplotlib.pyplot as plt
+import os
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+
+# Définir les paramètres
+img_size = 255  # Taille d'entrée
+num_classes = 4
+batch_size = 32
+epochs = 50
+dataset_path = "C:/Users/win 10/Desktop/datasetvgg"
+
+# Augmentation des données
+train_data_gen = ImageDataGenerator(
+    rescale=1./255,
+    rotation_range=30,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    shear_range=0.2,
+    zoom_range=0.4,
+    horizontal_flip=True,
+    fill_mode='nearest'
+)
+
+val_data_gen = ImageDataGenerator(rescale=1./255)
+
+test_data_gen = ImageDataGenerator(rescale=1./255)
+
+# Générateurs de données pour les ensembles d'entraînement, de validation et de test
+train_generator = train_data_gen.flow_from_directory(
+    directory=os.path.join(dataset_path, 'train'),
+    target_size=(img_size, img_size),
+    batch_size=batch_size,
+    class_mode='categorical',
+    shuffle=True
+)
+
+val_generator = val_data_gen.flow_from_directory(
+    directory=os.path.join(dataset_path, 'val'),
+    target_size=(img_size, img_size),
+    batch_size=batch_size,
+    class_mode='categorical',
+    shuffle=True
+)
+
+test_generator = test_data_gen.flow_from_directory(
+    directory=os.path.join(dataset_path, 'test'),
+    target_size=(img_size, img_size),
+    batch_size=batch_size,
+    class_mode='categorical',
+    shuffle=False
+)
+
+
+model = Sequential([
+    Conv2D(32, (3, 3), activation='relu', input_shape=(img_size, img_size, 3)),
+    MaxPooling2D((2, 2)),
+    Conv2D(64, (3, 3), activation='relu'),
+    MaxPooling2D((2, 2)),
+    Conv2D(128, (3, 3), activation='relu'),
+    MaxPooling2D((2, 2)),
+    Conv2D(128, (3, 3), activation='relu'),
+    MaxPooling2D((2, 2)),
+    Flatten(),
+    Dense(512, activation='relu'),
+    Dropout(0.5),
+    Dense(num_classes, activation='softmax')
+])
+
+
+model.compile(optimizer='adam',
+              loss='categorical_crossentropy',
+              metrics=['accuracy'])
+
+
+history = model.fit(
+    train_generator,
+    epochs=epochs,
+    validation_data=val_generator
+)
+
+# Afficher les courbes d'apprentissage
+plt.plot(history.history['accuracy'], label='Training Accuracy')
+plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Training and Validation Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.show()
+
+plt.plot(history.history['loss'], label='Training Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title('Training and Validation Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
+
+# Évaluer le modèle sur l'ensemble de test
+test_loss, test_accuracy = model.evaluate(test_generator)
+print("Test Loss:", test_loss)
+print("Test Accuracy:", test_accuracy)
+
+# Matrice de confusion
+Y_pred = model.predict(test_generator)
+y_pred = np.argmax(Y_pred, axis=1)
+cm = confusion_matrix(test_generator.classes, y_pred)
+
+# Affichage de la matrice de confusion
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=test_generator.class_indices.keys(), yticklabels=test_generator.class_indices.keys())
+plt.xlabel('Predicted labels')
+plt.ylabel('True labels')
+plt.title('Confusion Matrix')
+plt.show()
+
+# Sauvegarder le modèle
+model.save("reseau2v3_model.h5")
