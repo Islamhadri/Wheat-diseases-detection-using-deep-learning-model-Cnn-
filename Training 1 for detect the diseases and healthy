@@ -1,0 +1,66 @@
+from tensorflow.keras import layers, models
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.utils import shuffle
+from sklearn.metrics import accuracy_score
+import numpy as np
+from PIL import Image
+import os
+
+# Chargez vos images et leurs étiquettes
+# Assurez-vous que vos images sont dans un dossier avec des sous-dossiers pour chaque classe (par exemple, "sain", "rouille", "oïdium", etc.).
+
+data_path = "chemin/vers/votre/ensemble/de/données"
+classes = os.listdir(data_path)
+
+images = []
+labels = []
+
+for classe in classes:
+    class_path = os.path.join(data_path, classe)
+    for image_name in os.listdir(class_path):
+        image_path = os.path.join(class_path, image_name)
+        img = Image.open(image_path)
+        img = img.resize((224, 224))  # Redimensionnez vos images selon vos besoins
+        img_array = np.array(img)
+        images.append(img_array)
+        labels.append(classe)
+
+# Convertissez les listes en tableaux NumPy
+images = np.array(images)
+labels = np.array(labels)
+
+# Mélangez les données
+images, labels = shuffle(images, labels, random_state=42)
+
+# Encodez les étiquettes en valeurs numériques
+label_encoder = LabelEncoder()
+labels_encoded = label_encoder.fit_transform(labels)
+
+# Divisez les données en ensembles de formation et de test
+X_train, X_test, y_train, y_test = train_test_split(images, labels_encoded, test_size=0.2, random_state=42)
+
+# Normalisez les données
+X_train = X_train / 255.0
+X_test = X_test / 255.0
+
+# Construisez le modèle CNN
+model = models.Sequential()
+model.add(layers.Conv2D(32, (3, 3), activation='relu', input_shape=(224, 224, 3)))
+model.add(layers.MaxPooling2D((2, 2)))
+model.add(layers.Conv2D(64, (3, 3), activation='relu'))
+model.add(layers.MaxPooling2D((2, 2)))
+model.add(layers.Conv2D(64, (3, 3), activation='relu'))
+model.add(layers.Flatten())
+model.add(layers.Dense(64, activation='relu'))
+model.add(layers.Dense(len(classes), activation='softmax'))
+
+# Compilez le modèle
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Entraînez le modèle
+model.fit(X_train, y_train, epochs=10, validation_split=0.2)
+
+# Évaluez le modèle sur l'ensemble de test
+test_loss, test_acc = model.evaluate(X_test, y_test)
+print(f"Précision du modèle CNN : {test_acc * 100:.2f}%")
