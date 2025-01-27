@@ -1,0 +1,44 @@
+port os
+import shutil
+from sklearn.model_selection import train_test_split
+
+# Chemin vers les répertoires de données
+wheat_helt_path = "C:/Users/win 10/Desktop/datasetwheat/Wheat_helt"
+wheat_inf_path = "C:/Users/win 10/Desktop/datasetwheat/Wheat_inf"
+
+# Nouveau chemin pour les ensembles d'entraînement, de validation et de test
+new_data_path = "C:/Users/win 10/Desktop/datasetwheat1"
+
+# Créer les répertoires pour les ensembles d'entraînement, de validation et de test
+train_path = os.path.join(new_data_path, "train")
+val_path = os.path.join(new_data_path, "val")
+test_path = os.path.join(new_data_path, "test")
+os.makedirs(train_path, exist_ok=True)
+os.makedirs(val_path, exist_ok=True)
+os.makedirs(test_path, exist_ok=True)
+
+# Copier les données non malades (wheat_helt) dans les ensembles train, val et test
+helt_files = os.listdir(wheat_helt_path)
+train_helt, test_helt = train_test_split(helt_files, test_size=0.2, random_state=42)
+train_helt, val_helt = train_test_split(train_helt, test_size=0.25, random_state=42) # 0.25 x 0.8 = 0.2
+
+for file in train_helt:
+    shutil.copy(os.path.join(wheat_helt_path, file), os.path.join(train_path, file))
+for file in val_helt:
+    shutil.copy(os.path.join(wheat_helt_path, file), os.path.join(val_path, file))
+for file in test_helt:
+    shutil.copy(os.path.join(wheat_helt_path, file), os.path.join(test_path, file))
+
+# Copier les données malades dans les ensembles train, val et test (pour chaque maladie)
+diseases = ["septoria", "stripe_rust", "Brown_rust", "Yellow_rust"]
+for disease in diseases:
+    disease_path = os.path.join(wheat_inf_path, disease)
+    disease_files = os.listdir(disease_path)
+    train_disease, test_disease = train_test_split(disease_files, test_size=0.2, random_state=42)
+    train_disease, val_disease = train_test_split(train_disease, test_size=0.25, random_state=42)
+    for file in train_disease:
+        shutil.copy(os.path.join(disease_path, file), os.path.join(train_path, file))
+    for file in val_disease:
+        shutil.copy(os.path.join(disease_path, file), os.path.join(val_path, file))
+    for file in test_disease:
+        shutil.copy(os.path.join(disease_path, file), os.path.join(test_path, file))
