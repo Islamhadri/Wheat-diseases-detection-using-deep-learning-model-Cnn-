@@ -1,0 +1,326 @@
+import tkinter as tk
+from tkinter import filedialog, ttk, messagebox
+from tkinter import PhotoImage
+from PIL import Image, ImageTk
+import cv2
+import numpy as np
+from tensorflow.keras.models import load_model
+import webbrowser
+
+model_classification = load_model('reseau2v3_model.h5')
+model_detection = load_model('wheatcnnonaa.h5')
+img_size = 255
+zoom_factor = 1.5  # Zoom factor (1.0 means no size modification)
+confidence_threshold = 0.9  # Increased confidence threshold for disease detection
+low_confidence_threshold = 0.6  # Confidence threshold for non-wheat prediction
+
+# Variables for image cropping
+is_cropping = False
+x_start, y_start, x_end, y_end = 0, 0, 0, 0
+selected_image_path = ""
+
+# Function to preprocess the image
+def preprocess_image(image):
+    image = cv2.resize(image, (img_size, img_size))
+    image = image.astype('float32') / 255.0  # Normalization
+    image = np.expand_dims(image, axis=0)
+    return image
+
+# Function to detect disease directly with the second model
+def detect_disease_directly(image_path):
+    try:
+        image = Image.open(image_path)
+        image_resized = image.resize((img_size, img_size))
+        image_array = np.array(image_resized)
+        image_array = preprocess_image(image_array)
+
+        prediction = model_classification.predict(image_array)
+
+        class_names = ["Brown Rust", "Wheat Leaf Rust", "Yellow Rust", "Septoria"]
+        confidences = {class_names[i]: prediction[0][i] for i in range(len(class_names))}
+
+        predicted_class_index = np.argmax(prediction)
+        predicted_class = class_names[predicted_class_index]
+        confidence_percentage = prediction[0][predicted_class_index] * 100
+
+        # Check if confidence is below low_confidence_threshold
+        if confidence_percentage < low_confidence_threshold * 100:
+            result_label_prediction_value.config(text="This picture is not wheat")
+            result_label_confidence_value.config(text=f"< {low_confidence_threshold * 100:.2f}%")
+        else:
+            # Display prediction and confidences
+            result_label_prediction_value.config(text=f"{predicted_class}")
+            result_label_confidence_value.config(text=f"{confidence_percentage:.2f}%")
+
+        # Display confidences for all classes
+        confidence_text = "\n".join([f"{name}: {confidences[name] * 100:.2f}%" for name in class_names])
+        result_label_confidences_all.config(text=confidence_text)
+    except Exception as e:
+        result_label_prediction_value.config(text="Error during detection.")
+        result_label_confidence_value.config(text=f"{str(e)}")
+
+# Function to detect whether sick or not with the first model
+def detect_sick_or_not(image_path):
+    try:
+        image = Image.open(image_path)
+        image_resized = image.resize((img_size, img_size))
+        image_array = np.array(image_resized)
+        image_array = preprocess_image(image_array)
+
+        prediction_detection = model_detection.predict(image_array)
+        confidence = prediction_detection[0][0]  # Confidence that the image shows diseased wheat
+        confidence_percentage_detection = confidence * 100
+
+        if confidence > confidence_threshold:
+            detect_disease_directly(image_path)
+        else:
+            # Increase the confidence percentage for healthy predictions
+            confidence_percentage_detection = (1 - confidence) * 100
+            if confidence_percentage_detection < 70:
+                detect_disease_directly(image_path)  # Re-evaluate as the confidence for healthy is low
+            else:
+                result_label_prediction_value.config(text="Healthy")
+                result_label_confidence_value.config(text=f"{confidence_percentage_detection:.2f}%")
+                result_label_confidences_all.config(text="")
+    except Exception as e:
+        result_label_prediction_value.config(text="Error during detection.")
+        result_label_confidence_value.config(text=f"{str(e)}")
+
+# Function to start the image cropping process
+def start_cropping(event):
+    global is_cropping, x_start, y_start
+    x_start = event.x
+    y_start = event.y
+    is_cropping = True
+
+# Function to end the image cropping process
+def end_cropping(event):
+    global is_cropping, x_end, y_end
+    x_end = event.x
+    y_end = event.y
+    is_cropping = False
+    perform_crop()
+
+# Function to crop the image into a triangle defined by three points
+def perform_crop():
+    global x_start, y_start, x_end, y_end
+    global selected_image_path
+
+    if x_start != x_end and y_start != y_end:
+        # Load the image
+        image = cv2.imread(selected_image_path)
+
+        # Define the vertices of the triangle
+        pts = np.array([[x_start, y_start], [x_end, y_end], [x_start, y_end]], np.int32)
+        pts = pts.reshape((-1, 1, 2))
+
+        # Create a mask for the triangle
+        mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        cv2.drawContours(mask, [pts], -1, (255), -1)
+
+        # Apply the mask to the image
+        masked_image = cv2.bitwise_and(image, image, mask=mask)
+
+        # Save the cropped image temporarily
+        cv2.imwrite('cropped_image_temp.jpg', masked_image)
+
+        # Display the cropped image
+        display_selected_image('cropped_image_temp.jpg')
+    else:
+        result_label_prediction_value.config(text="Please select a valid area.")
+        result_label_confidence_value.config(text="")
+
+# Function to open the file dialog and use direct disease detection
+def open_file_dialog_direct_detection():
+    file_path = filedialog.askopenfilename()
+    if file_path:
+        display_selected_image(file_path)
+        detect_disease_directly(file_path)
+
+# Function to open the file dialog and detect whether sick or not
+def open_file_dialog_sick_or_not():
+    file_path = filedialog.askopenfilename()
+    if file_path:
+        display_selected_image(file_path)
+        detect_sick_or_not(file_path)
+
+# Function to open the Telegram bot
+def open_telegram_bot():
+    webbrowser.open("https://t.me/WheatDis_bot")
+
+# Function to display the selected image in the interface with a zoom in the middle
+def display_selected_image(image_path):
+    # Clear previous images if any
+    for widget in image_frame.winfo_children():
+        widget.destroy()
+
+    # Open and resize the original image
+    original_image = Image.open(image_path)
+    original_image.thumbnail((300, 300))  # Resize the image to fit in a 300x300 box
+
+    # Convert the original image to Tkinter format
+    original_photo = ImageTk.PhotoImage(original_image)
+    original_label = tk.Label(image_frame, image=original_photo, bg='white')  # White background for the image
+    original_label.image = original_photo  # Keep a reference to the image for display
+    original_label.pack(side=tk.LEFT, padx=10)
+
+    # Open and resize the image for zoomed view
+    zoomed_image = Image.open(image_path)
+    width, height = zoomed_image.size
+    zoom_box = (width // 4, height // 4, 3 * width // 4, 3 * height // 4)  # Define the zoom box
+    zoomed_image = zoomed_image.crop(zoom_box)  # Crop the image to the zoom box
+    zoomed_image = zoomed_image.resize((300, 300))  # Resize the zoomed image
+
+    # Convert the zoomed image to Tkinter format
+    zoomed_photo = ImageTk.PhotoImage(zoomed_image)
+    zoomed_label = tk.Label(image_frame, image=zoomed_photo, bg='white')  # White background for the image
+    zoomed_label.image = zoomed_photo  # Keep a reference to the image for display
+    zoomed_label.pack(side=tk.RIGHT, padx=10)
+
+    # Add an image path reference for use in cropping
+    original_label.image_path = image_path
+
+    # Attach cropping events to the original image
+    original_label.bind("<Button-1>", start_cropping)
+    original_label.bind("<ButtonRelease-1>", end_cropping)
+
+    # Keep a reference to the selected image
+    global selected_image_path
+    selected_image_path = image_path
+
+# Function to start image cropping manually
+def start_cropping_manual():
+    if selected_image_path:
+        root.config(cursor="crosshair")
+        result_label_prediction_value.config(text="Select an area to crop.")
+        result_label_confidence_value.config(text="")
+
+# Function to show the author's name
+def show_author():
+    messagebox.showinfo("Author", "Author: Your Name")
+
+# Function to request camera permission and take a photo
+def request_camera_permission():
+    if messagebox.askokcancel("Camera Permission", "Do you allow access to the camera to take a photo?"):
+        take_photo()
+
+# Function to take a photo with the camera
+def take_photo():
+    cap = cv2.VideoCapture(0)
+
+    if not cap.isOpened():
+        messagebox.showerror("Error", "Unable to access the camera.")
+        return
+
+    ret, frame = cap.read()
+    if ret:
+        photo_path = 'captured_photo.jpg'
+        cv2.imwrite(photo_path, frame)
+        cap.release()
+        display_selected_image(photo_path)
+        detect_disease_directly(photo_path)
+    else:
+        messagebox.showerror("Error", "Failed to capture photo.")
+        cap.release()
+
+def show_author():
+    author_info = "Supervisor: Pr. Bencheriet C.\nStudent: H. Islam\nSmart Detection of Wheat Diseases 2024"
+    messagebox.showinfo("Author Information", author_info)
+
+# Function to show help information
+def show_help():
+    help_info = "Contact Information:\n\n" \
+                "Facebook: IslamHad\n" \
+                "Email: hadriislam99@gmail.com\n" \
+                "Phone: +1234567890"
+    messagebox.showinfo("Help", help_info)
+
+# Interface creation and setup
+root = tk.Tk()
+root.title("Wheat pfe")
+
+# Load and display the background image
+background_image = Image.open('C:/Users/win 10/Desktop/datasetvgg2/back.jpg')
+background_photo = ImageTk.PhotoImage(background_image)
+background_label = tk.Label(root, image=background_photo)
+background_label.place(relwidth=1, relheight=1)
+
+# Set style for buttons
+style = ttk.Style()
+style.configure('TButton', font=('Helvetica', 14), padding=5)
+
+# Create and place buttons vertically on the right
+button_frame = tk.Frame(root)
+button_frame.pack(side=tk.RIGHT, padx=20, pady=10, fill=tk.Y)
+
+btn_select_and_detect = ttk.Button(button_frame, text="Diagnose Diseases(DDN2)", command=open_file_dialog_direct_detection,
+                                   style='TButton')
+btn_select_and_detect.pack(pady=10)
+
+btn_select_and_detect_sick = ttk.Button(button_frame, text="Detection Diseases", command=open_file_dialog_sick_or_not,
+                                        style='TButton')
+btn_select_and_detect_sick.pack(pady=10)
+
+btn_crop = ttk.Button(button_frame, text="Crop", command=start_cropping_manual, style='TButton')
+btn_crop.pack(pady=10)
+
+btn_camera_permission = ttk.Button(button_frame, text="Camera", command=request_camera_permission, style='TButton')
+btn_camera_permission.pack(pady=10)
+
+btn_select_and_telegram = ttk.Button(button_frame, text="Telegram Bot", command=open_telegram_bot, style='TButton')
+btn_select_and_telegram.pack(pady=10)
+
+# Create and place Author button
+btn_author = ttk.Button(root, text="Author", command=show_author, style='TButton')
+btn_author.place(x=20, y=20)  # Position the button at (20, 20) from the top-left corner of the root window
+
+# Create and place Help button
+btn_help = ttk.Button(root, text="Help", command=show_help, style='TButton')
+btn_help.place(x=20, y=90)  # Adjust the x-position as needed
+
+btn_exit = ttk.Button(button_frame, text="Exit", command=root.destroy, style='TButton')
+btn_exit.pack(pady=10)
+
+# Load and display the filler images
+filler_images = []
+filler_paths = ['C:/Users/win 10/Desktop/datasetvgg2/R.jpg', 'C:/Users/win 10/Desktop/datasetvgg2/S.jpg',
+                'C:/Users/win 10/Desktop/datasetvgg2/a6.jpg', 'C:/Users/win 10/Desktop/datasetvgg2/a7.jpg',
+                'C:/Users/win 10/Desktop/datasetvgg2/a8.jpg']
+for path in filler_paths:
+    filler_image = Image.open(path)
+    filler_image.thumbnail((200, 300))  # Resize filler image
+    filler_photo = ImageTk.PhotoImage(filler_image)
+    filler_images.append(filler_photo)
+
+# Create and place filler image labels
+filler_labels = []
+for photo in filler_images:
+    filler_label = tk.Label(button_frame, image=photo, bg='black')  # Black background for filler images
+    filler_label.pack(pady=5)
+    filler_labels.append(filler_label)
+
+# Frame for displaying images
+image_frame = tk.Frame(root, bg='white', width=800, height=800, bd=5, relief=tk.SOLID)  # White background for image frame with black border
+image_frame.pack(pady=10)
+
+# Frame for results
+result_frame = tk.Frame(root, bg='white')
+result_frame.pack(pady=10)
+
+result_label_prediction = tk.Label(result_frame, text="Prediction:", font=("Helvetica", 14, "bold"), bg='white')
+result_label_prediction.grid(row=0, column=0, sticky='w')
+
+result_label_prediction_value = tk.Label(result_frame, text="", font=("Helvetica", 14), bg='white')
+result_label_prediction_value.grid(row=0, column=1, sticky='w')
+
+result_label_confidence = tk.Label(result_frame, text="Confidence:", font=("Helvetica", 14, "bold"), bg='white')
+result_label_confidence.grid(row=1, column=0, sticky='w')
+
+result_label_confidence_value = tk.Label(result_frame, text="", font=("Helvetica", 14), bg='white')
+result_label_confidence_value.grid(row=1, column=1, sticky='w')
+
+result_label_confidences_all = tk.Label(result_frame, text="", font=("Helvetica", 12), bg='white')
+result_label_confidences_all.grid(row=2, column=0, columnspan=2, sticky='w')
+
+# Launch the interface
+root.mainloop()
